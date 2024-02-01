@@ -1,0 +1,61 @@
+from flask import Flask, jsonify, request
+from pymongo import MongoClient
+
+app = Flask(__name__)
+client = MongoClient('mongodb://localhost:27017/')
+db = client['your_database_name']
+products_collection = db['products']
+
+
+dummy_data = [
+    {"name": "TV", 
+     "price": 500, 
+     "quantity": 10},
+    
+    {"name": "Laptop", 
+     "price": 1000, 
+     "quantity": 5}, 
+]
+products_collection.insert_many(dummy_data)
+
+@app.route('/products')
+def get_products():
+    limit = int(request.args.get('limit', 10))
+    offset = int(request.args.get('offset', 0))
+
+    min_price = int(request.args.get('min_price', 0))
+    max_price = int(request.args.get('max_price', float('inf')))
+
+    pipeline = [
+        {"$match": {"price": {"$gte": min_price, "$lte": max_price}}},
+        {"$facet": {
+            "data": [{"$skip": offset}, {"$limit": limit}],
+            "totalCount": [{"$count": "total"}]
+        }}
+    ]
+    result = list(products_collection.aggregate(pipeline))[0]
+
+    data = result['data']
+    total = result['totalCount'][0]['total']
+
+    next_offset = offset + limit if offset + limit < total else None
+    prev_offset = offset - limit if offset - limit >= 0 else None
+
+    response = {
+        "data": [{
+            "id": str(product['_id']),
+            "name": product['name'],
+            "price": product['price'],
+            "quantity": product['quantity']
+        } for product in data],
+        "page": {
+            "limit": limit,
+            "nextOffset": next_offset,
+            "prevOffset": prev_offset,
+            "total": total
+        }
+    }
+    return jsonify(response)
+
+if __name__ == '__main__':
+    app.run(debug=True)
